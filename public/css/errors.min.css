@@ -1,0 +1,98 @@
+/* 
+    Created on : 13/09/2017, 09:29:59 AM
+    Author     : juan.pinzon
+*/
+.body-errors {
+  background-color: #093341;
+  background-repeat: repeat;
+  font-family: 'Questrial';
+  margin: 0px;
+  padding: 0px;
+  /* background-image: url('../images/stars.png') */
+  background-image: url('../images/stars.png')
+}
+
+.errorPage {
+  max-width: 1000px;
+  margin: 0px auto;
+  padding: 100px 10px 0 10px;
+}
+
+.errorPage-container {
+  width: 100%;
+  display: flex;
+  -webkit-box-align: center;
+  align-items: center;
+  -webkit-box-pack: center;
+  justify-content: center;
+  -webkit-box-orient: vertical;
+  flex-direction: column;
+  align-content: center;
+}
+
+.errorPage-topImage {
+  width: 100%;
+  display: flex;
+  -webkit-box-pack: center;
+  justify-content: center;
+}
+
+.errorPage-image {
+  max-width: 340px;
+  margin: 0;
+}
+
+.errorPage-image img {
+  width: 100%;
+  margin: 0;
+}
+
+.errorPage-text{
+  color: #fff;
+  text-align: center;
+}
+
+.errorPage-text .title{
+  font-size: 50px;
+  margin: 0;
+}
+
+.errorPage-text .desc{
+  font-size: 43px;
+  margin: 0;
+}
+
+.errorPage-text p{
+  font-size: 18px;
+}
+
+.fig-img-bottom{
+  margin: 0px;
+}
+
+.img-cohete{
+  max-height: 100px;
+  transform: rotate(270deg);
+  margin-left: 0%;
+  -webkit-animation: anitop 1s;
+  -moz-animation: anitop 1s;
+  -o-animation: anitop 1s;
+}
+
+@keyframes anitop{
+  0%{
+    transform: rotate(0deg);
+    margin-top: 40%;
+    margin-left: 100%;
+  }
+  50%{
+    transform: rotate(-70deg);
+    margin-top: 5%;
+    margin-left: 15%
+  }
+  
+  100%{
+    transform: rotate(-90deg);
+    margin-top: 0%;
+  }
+}

@@ -1,0 +1,2112 @@
+<?php
+
+namespace Sigmamovil\Wrapper;
+
+ini_set('memory_limit', '1024M');
+date_default_timezone_set('America/Bogota');
+
+/**
+ * Description of StaticsWrapper
+ *
+ * @author desarrollo3
+ */
+class StaticsWrapper extends \BaseWrapper {
+
+  public function __construct() {
+    $this->db = \Phalcon\DI::getDefault()->get('db');
+    $this->statusSms = \Phalcon\DI::getDefault()->get('statusSms');
+    $this->limit = \Sigmamovil\General\Misc\PaginationDecorator::DEFAULT_LIMIT;
+  }
+
+  public $statics = array(),
+          $idMail,
+          $idSurvey,
+          $openWeek,
+          $openDay,
+          $openHour,
+          $page,
+          $type,
+          $stringSearch,
+          $typeFilter,
+          $idSms,
+          $statusSms,
+          $configuration;
+
+  public function getAllInfoMail($type) {
+
+    $sql = "SELECT mail.idMail, mail.idSubaccount, mail.idEmailsender,  mail.categorycampaign,"
+            . " mail.name, mail.sender, mail.replyto, mail.subject, mail.target, mail.created, "
+            . " mail.updated, mail.status, mail.quantitytarget, mail.test, mail.deleted, emailsender.email AS emailsender, "
+            . " name_sender.name as namesender, mail.scheduleDate AS confirmationDate FROM mail  "
+            . " LEFT JOIN mxmc ON mxmc.idMail = mail.idMail "
+            . " LEFT JOIN emailsender ON mail.idEmailsender = emailsender.idEmailsender "
+            . " LEFT JOIN name_sender ON mail.idNameSender = name_sender.idNameSender "
+            . " WHERE mail.idMail = {$this->idMail} "
+            . " GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18";
+    $mail = \Phalcon\DI::getDefault()->get('db')->fetchAll($sql);
+
+    $this->statics["mail"] = $mail[0];
+    $this->statics["mail"]['target'] = $this->target($this->statics["mail"]['target']);
+    if ($type == 0) {
+      $this->statics["shortStaticsUrl"] = $this->encodeLink($this->statics["mail"]["idMail"], $this->statics["mail"]["idSubaccount"], "summary");
+      $this->statics["fullStaticsUrl"] = $this->encodeLink($this->statics["mail"]["idMail"], $this->statics["mail"]["idSubaccount"], "complete");
+    }
+    $subaccount = \Subaccount::findFirst(["conditions" => "idSubaccount = ?0",
+                "bind" => [$this->statics["mail"]["idSubaccount"]]]);
+
+    $this->statics["urlImg"] = \Phalcon\DI::getDefault()->get('urlManager')->get_base_uri(true) . "assets/" . $subaccount->idAccount . "/images/mails/" . $this->statics["mail"]["idMail"] . "_thumbnail.png";
+    $this->statics["urlImgDefault"] = \Phalcon\DI::getDefault()->get('urlManager')->get_base_uri(true) . "images/general/no-preview.png";
+    $this->getAllMessageSent();
+    $this->getAllOpen();
+    $this->clicsTotalUniques();
+    $this->bouncedTotal();
+    $this->unsubscribedTotal();
+    $this->spamTotal();
+
+    $mail = \Mail::findFirst(["conditions" => "idMail = ?0", "bind" => [0 => $this->idMail]]);
+    $mail->uniqueOpening = $this->statics["open"];
+    $mail->bounced = $this->statics["bounced"];
+    $mail->spam = $this->statics["spam"];
+
+    if (!$mail->save()) {
+      foreach ($mail->getMessages() as $msg) {
+        $this->logger->log("Message: {$msg}");
+        throw new \InvalidArgumentException($msg);
+      }
+    }
+  }
+
+  public function encodeLink($idMail, $idSubaccount, $type) {
+    $src = \Phalcon\DI::getDefault()->get('urlManager')->get_base_uri(true) . 'statistic/share/1-' . $idMail . "-" . $idSubaccount . "-" . $type;
+    return $src . '-' . md5($src . '-Sigmamovil_Rules');
+  }
+
+  public function target($value) {
+
+    $p = json_decode($value);
+    if (isset($p->contactlists)) {
+      $v = "Lista de contactos: ";
+      for ($index = 0; $index < count($p->contactlists); $index++) {
+        $v .= $p->contactlists[$index]->name . ", ";
+      }
+    } else if (isset($p->segment)) {
+      $v = "Segmentos: ";
+      for ($index = 0; $index < count($p->segment); $index++) {
+        
+      }
+    }
+
+    $v = substr($v, 0, -2);
+
+    return $v;
+  }
+
+  public function staticsClic() {
+    $this->cleanTmpTable();
+    $open = \Mxc::find([["uniqueClicks" => ['$gte' => 1], "idMail" => $this->idMail]]);
+    $this->createTmpTable("uniqueClicks", $open);
+  }
+
+  public function staticsUnsuscribed() {
+    $this->cleanTmpTable();
+    $open = \Mxc::find([["unsubscribed" => ['$gte' => 1], "idMail" => $this->idMail]]);
+    $this->createTmpTable("unsubscribed", $open);
+  }
+
+  public function staticsSpam() {
+    $this->cleanTmpTable();
+    $open = \Mxc::find([["spam" => ['$gte' => "1"], "idMail" => $this->idMail]]);
+    $this->createTmpTable("spam", $open);
+  }
+
+  public function staticsOpen() {
+    $this->cleanTmpTable();
+    if (isset($this->statics["open"])) {
+      $this->createTmpTable("open", $this->statics["open"]);
+    } else {
+      $open = \Mxc::find([["open" => ['$gte' => 1], "idMail" => $this->idMail]]);
+      $this->createTmpTable("open", $open);
+    }
+  }
+
+  public function staticsBounced() {
+    $bounced = \Mxc::find([["bounced" => ['$gte' => "1"], "idMail" => $this->idMail]]);
+    $arr = array();
+    $soft = 0;
+    $hard = 0;
+    foreach ($bounced as $key) {
+      if ($key->bouncedCode == 10 || $key->bouncedCode == 90 || $key->bouncedCode == 200) {
+        $hard++;
+      } else {
+        $soft++;
+      }
+    }
+    $obj = new \stdClass();
+    $obj->total = count($bounced);
+    $obj->soft = $soft;
+    $obj->hard = $hard;
+    array_push($arr, $obj);
+    return $arr;
+  }
+
+  public function createTmpTable($type, $info) {
+    $route = \Phalcon\DI::getDefault()->get('path')->path . "tmpopen.csv";
+    $file = fopen($route, "w");
+    $i = 1;
+    foreach ($info as $value) {
+      fwrite($file, $value->idContact . " ,");
+      fwrite($file, $value->$type . " ,");
+      fwrite($file, $value->email . " ,");
+      fwrite($file, $value->name . " ,");
+      fwrite($file, $value->lastname . " ,");
+      fwrite($file, $value->indicative . " ,");
+      fwrite($file, $value->phone . " ,");
+      fwrite($file, $value->totalOpening);
+//      fwrite($file, $value->email);
+      fwrite($file, "\r\n");
+      $i++;
+    }
+    $tmpopen = fclose($file);
+    if (!$tmpopen) {
+      throw new Exception("No se ha generado el archivo temporal con las fechas");
+    }
+    $this->db->query("LOAD DATA INFILE '{$route}' IGNORE INTO TABLE tmp_table "
+            . "FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '\"' LINES TERMINATED BY '\r\n' ");
+    $this->graphWeek();
+//    $j = 0;
+//    $k = 0;
+//    $startArr = [];
+    $count = 0;
+    $p = [];
+    foreach ($this->openWeek as $key) {
+      $end = strtotime("next sunday", strtotime($key["week"]));
+      $start = strtotime("-1 week +1 day", $end);
+
+      if (isset($p[$start])) {
+        $p[$start] += $key["count"];
+      } else {
+        $p[$start] = $key["count"];
+      }
+
+      if (isset($this->statics["statics"][$start])) {
+
+        //OPCIONAL SE TIENE Q PROBAR CON MUCHOS REGISTROS
+        $this->statics["statics"][$start]["week"] = ["week" => strtotime($key["week"]), "count" => $p[$start],
+            "interval" => "Entre " . date('d/M/Y', $start) . " y " . date('d/M/Y', $end)];
+      } else {
+
+        $this->statics["statics"][$start]["week"] = ["week" => strtotime($key["week"]), "count" => $p[$start],
+            "interval" => "Entre " . date('d/M/Y', $start) . " y " . date('d/M/Y', $end)];
+      }
+      $this->graphDay($key, $start);
+    }
+
+    //unlink($route);
+  }
+
+  public function graphWeek() {
+    $sql = "SELECT count(idTmpTable) AS count, FROM_UNIXTIME(dateOpen, '%Y-%m-%d') as week  "
+            . " FROM tmp_table GROUP BY  WEEK (FROM_UNIXTIME(dateOpen)), 2 ORDER BY week ASC";
+//    $sql = "SELECT count(dateOpen) as count, dateOpen as week FROM tmp_table GROUP BY  week(from_unixtime(2)), dateOpen";
+    $this->openWeek = $this->db->fetchAll($sql);
+  }
+
+  public function graphDay($time, $indexWeek) {
+    $end = strtotime("next sunday", strtotime($time["week"]));
+    $start = strtotime("-1 week +1 day", $end);
+
+    $sql = "SELECT count(dateOpen) AS count, FROM_UNIXTIME(dateOpen, '%d-%m-%Y') AS day FROM tmp_table WHERE "
+            . " dateOpen BETWEEN {$start} AND {$end} "
+            . " GROUP BY day(FROM_UNIXTIME(dateOpen)), 2";
+    $p = $this->db->fetchAll($sql);
+    $indexDay = 0;
+    foreach ($p as $value) {
+      $hour = str_replace("-", "/", $value["day"]);
+      $this->statics["statics"][$indexWeek]["week"]["day"][$indexDay] = ["interval" => $hour, "day" => strtotime("next sunday", strtotime($value["day"])), "count" => $value["count"], "week" => $start];
+      $this->graphHour($value, $indexDay, $indexWeek, $start);
+      $indexDay++;
+    }
+  }
+
+  public function graphHour($time, $indexDay, $indexWeek, $startWeek) {
+    $hour = $time["day"];
+    $start = strtotime($hour . " 00:00:00");
+    $end = strtotime($hour . " 23:59:00");
+    $sql = "SELECT count(dateOpen) AS count, FROM_UNIXTIME(dateOpen, '%H')  AS hour"
+            . "  FROM tmp_table WHERE "
+            . " dateOpen BETWEEN {$start} AND {$end} "
+            . "GROUP BY hour(from_unixtime(dateOpen)), 2";
+
+    $p = $this->db->fetchAll($sql);
+    foreach ($p as $value) {
+      $this->statics["statics"][$indexWeek]["week"]["day"][$indexDay]["hour"][] = ["interval" => $value["hour"] . "-00", "hour" => $value["hour"], "count" => $value["count"], "week" => $startWeek];
+    }
+  }
+
+  public function dataInfo() {
+    (($this->page > 0) ? $this->page = ($this->page * $this->limit) : "");
+
+    switch ($this->type) {
+      case "open":
+        $sql = "SELECT * FROM tmp_table LIMIT {$this->limit} OFFSET {$this->page}";
+        $data = $this->db->fetchAll($sql);
+        $sql2 = "SELECT * FROM tmp_table ";
+        $open = $this->db->fetchAll($sql2);
+        $this->statics["info"][] = $data;
+        $this->statics["info"][] = array("total" => count($open), "total_pages" => ceil(count($open) / $this->limit));
+        break;
+      case "clic":
+        $sql = "SELECT link, totalClicks FROM mxl LEFT JOIN mail_link ON"
+                . " mxl.idMail_link = mail_link.idMail_link WHERE idMail = {$this->idMail} LIMIT {$this->limit} OFFSET {$this->page}";
+        $data = $this->db->fetchAll($sql);
+        $sql2 = "SELECT link, totalClicks FROM mxl LEFT JOIN mail_link ON"
+                . " mxl.idMail_link = mail_link.idMail_link WHERE idMail = {$this->idMail}";
+        $data2 = $this->db->fetchAll($sql2);
+        $this->statics["info"][] = $data;
+        $this->statics["info"][] = array("total" => count($data2), "total_pages" => ceil(count($data2) / $this->limit));
+        $this->statics["info"][] = $data2;
+        break;
+      case "unsuscribe":
+        $sql = "SELECT * FROM tmp_table LIMIT {$this->limit} OFFSET {$this->page}";
+        $data = $this->db->fetchAll($sql);
+        $sql2 = "SELECT * FROM tmp_table ";
+        $open = $this->db->fetchAll($sql2);
+        $this->statics["info"][] = $data;
+        $this->statics["info"][] = array("total" => count($open), "total_pages" => ceil(count($open) / $this->limit));
+        break;
+      case "bounced":
+        $where = array();
+        $where = ["bounced" => ['$gte' => "1"], "idMail" => $this->idMail];
+        if (isset($this->stringSearch->name)) {
+          if ($this->stringSearch->id != -1) {
+            switch ($this->typeFilter) {
+              case "type":
+                $in = array();
+                if ($this->stringSearch->name == "soft") {
+                  $in = [20, 21, 22, 23, 29, 30, 40, 50, 51, 52, 53, 54, 59, 60, 70, 100, 110, 120, 121];
+                } else if ($this->stringSearch->name == "hard") {
+                  $in = [10, 90, 200];
+                }
+                $where["bouncedCode"] = ['$in' => $in];
+                break;
+              case "category":
+                $where["bouncedCode"] = (int) $this->stringSearch->id;
+                break;
+              case "domain":
+                $name = $this->stringSearch->name;
+                $where["email"] = ['$regex' => ".*$name"];
+                break;
+              default :
+                throw new Exception("Se ha producido un error al enviar el tipo de filtros");
+                break;
+            }
+          }
+        }
+        $bounced = \Mxc::find(["limit" => $this->limit, "skip" => $this->page, $where]);
+        $open = \Mxc::find([$where]);
+        $array = array();
+        foreach ($bounced as $key) {
+          $c = new \stdClass();
+          $c->date = $key->bounced;
+          $c->email = $key->email;
+          $sql = "SELECT * FROM bounced_code WHERE idBounced_code = {$key->bouncedCode}";
+          $data = $this->db->fetchAll($sql);
+          if ($key->bouncedCode == 10 || $key->bouncedCode == 90 || $key->bouncedCode == 200) {
+            $c->type = "hard";
+          } else {
+            $c->type = "soft";
+          }
+          $c->description = $data[0]['description'];
+          array_push($array, $c);
+        }
+        $this->statics["info"][] = $array;
+        $this->statics["info"][] = array("total" => count($open), "total_pages" => ceil(count($open) / $this->limit));
+        break;
+      case "spam":
+        $sql = "SELECT * FROM tmp_table LIMIT {$this->limit} OFFSET {$this->page}";
+        $data = $this->db->fetchAll($sql);
+        $sql2 = "SELECT * FROM tmp_table ";
+        $open = $this->db->fetchAll($sql2);
+        $this->statics["info"][] = $data;
+        $this->statics["info"][] = array("total" => count($open), "total_pages" => ceil(count($open) / $this->limit));
+        break;
+    }
+  }
+
+  public function dataInfoClic() {
+
+    $arr = array();
+    $array = array();
+    $where = array();
+    $where['idMail'] = $this->idMail;
+
+    if (isset($this->stringSearch)) {
+      $idAccount = \Phalcon\DI::getDefault()->get('user')->UserType->subAccount->idAccount;
+      $sql = "SELECT * FROM mail_link LEFT JOIN  mxl ON mail_link.idMail_link = mxl.idMail_link WHERE "
+              . " idMail = {$this->idMail} AND link = '{$this->stringSearch}' AND idAccount = {$idAccount}";
+      $link = $this->db->fetchAll($sql);
+      $where['idMailLink'] = $link[0]['idMail_link'];
+    }
+
+    (($this->page > 0) ? $this->page = ($this->page * $this->limit) : "");
+    $mxcxl = \Mxcxl::find([$where, "limit" => $this->limit, "skip" => $this->page]);
+
+    foreach ($mxcxl as $key) {
+      $obj = new \stdClass();
+      $mailLink = \Maillink::findFirst(["conditions" => "idMail_link = ?0", "bind" => [0 => $key->idMailLink]]);
+      $contact = \Contact::findFirst([["idContact" => (int) $key->idContact]]);
+      $obj->email = $contact->email;
+      $obj->name = $contact->name;
+      $obj->lastname = $contact->lastname;
+      $obj->indicative = $contact->indicative;
+      $obj->phone = $contact->phone;
+      $obj->link = $mailLink->link;
+      $obj->date = $key->uniqueClicks;
+      array_push($array, $obj);
+    }
+    $open = \Mxcxl::find([$where]);
+    $arr["info"][] = $array;
+    $arr["info"][] = array("total" => count($open), "total_pages" => ceil(count($open) / $this->limit));
+    return $arr;
+  }
+
+  public function getAllDomain() {
+    $arr = array();
+    $domain = \Domain::find([["idAccount" => \Phalcon\DI::getDefault()->get('user')->UserType->subAccount->idAccount]]);
+    foreach ($domain as $key) {
+      $obj = new \stdClass();
+      $obj->id = $key->idDomain;
+      $obj->name = $key->domain;
+      array_push($arr, $obj);
+    }
+    return $arr;
+  }
+
+  public function getAllCategoryBounced() {
+    $arr = array();
+    $bounced = \BouncedCode::find();
+    foreach ($bounced as $key) {
+      $obj = new \stdClass();
+      $obj->id = $key->idBounced_code;
+      $obj->name = $key->description;
+      array_push($arr, $obj);
+    }
+    return $arr;
+  }
+
+  public function getAllMessageSent() {
+    $open = \Mxc::count([["idMail" => $this->idMail]]);
+    $this->statics["messageSent"] = $open;
+  }
+
+  public function getAllOpen() {
+    $open = \Mxc::count([["open" => ['$gte' => (int) 1], "idMail" => $this->idMail]]);
+//    $open = \Mxc::count([["open" != null]]);
+    $this->statics["open"] = $open;
+  }
+
+  public function clicsTotalUniques() {
+    $uniqueClicks = \Mxc::count([["uniqueClicks" => ['$gte' => 1], "idMail" => $this->idMail]]);
+    $this->statics["uniqueClicks"] = $uniqueClicks;
+  }
+
+  public function bouncedTotal() {
+    $uniqueClicks = \Mxc::count([["bounced" => ['$gte' => "1"], "idMail" => $this->idMail]]);
+    $this->statics["bounced"] = $uniqueClicks;
+  }
+
+  public function unsubscribedTotal() {
+    $uniqueClicks = \Mxc::count([["unsubscribed" => ['$gte' => 1], "idMail" => $this->idMail]]);
+    $this->statics["unsubscribed"] = $uniqueClicks;
+  }
+
+  public function spamTotal() {
+    $uniqueClicks = \Mxc::count([["spam" => ['$gte' => "1"], "idMail" => $this->idMail]]);
+    $this->statics["spam"] = $uniqueClicks;
+  }
+
+  public function cleanTmpTable() {
+    $sql = "DELETE FROM tmp_table WHERE 1= 1";
+    $this->db->execute($sql);
+  }
+
+  public function getInfoSms() {
+    $sql = "SELECT sms.name AS name, sms.startdate AS startdate, sms_category.name AS namecategory, "
+            . " sms.target AS target "
+            . " FROM sms  JOIN sms_category ON "
+            . "sms_category.idSmsCategory = sms.idSmsCategory WHERE sms.idSms = {$this->idSms}";
+    $sms = $this->db->fetchAll($sql);
+    $this->statics["sms"] = $sms[0];
+    $this->statics["sms"]['shortStaticsUrl'] = $this->encodeLinkSms($this->idSms, 'summary');
+//    $this->statics["sms"]['fullStaticsUrl'] = $this->encodeLinkSms($this->idSms, 'complete');
+
+    $sql2 = "SELECT * FROM smslote WHERE idSms = {$this->idSms} ";
+    $total = $this->db->fetchAll($sql2);
+    $this->statics["detail"][] = $data;
+    $this->statics["detail"][] = array("total" => count($total), "total_pages" => ceil(count($total) / $this->limit));
+  }
+
+  public function encodeLinkSms($idSms, $type) {
+    $src = \Phalcon\DI::getDefault()->get('urlManager')->get_base_uri(true) . 'statistic/smsshare/1-' . $idSms . "-" . $type;
+    return $src . '-' . md5($src . '-Sigmamovil_Rules');
+  }
+
+  public function graphSms() {
+    $sms = \Sms::findFirst(["conditions" => "idSms = ?0", "bind" => [0 => $this->idSms]]);
+    if ($sms->type == "contact") {
+      $sent = \Smsxc::count([["idSms" => (string) $this->idSms, "response" => "0: Accepted for delivery"]]);
+      $undelivered = \Smsxc::count([["idSms" => (string) $this->idSms, "response" => ['$ne' => "0: Accepted for delivery"]]]);
+    } else {
+      $sent = \Smslote::count(["conditions" => "status = ?0 AND idSms = ?1", "bind" => [0 => $this->statusSms->sent, 1 => $this->idSms]]);
+      $undelivered = \Smslote::count(["conditions" => "status = ?0 AND idSms = ?1", "bind" => [0 => "undelivered", 1 => $this->idSms]]);
+    }
+    $this->statics["sent"] = (int) $sent;
+    $this->statics["undelivered"] = (int) $undelivered;
+  }
+
+  public function getDetailSms() {
+    $sms = \Sms::findFirst(["conditions" => "idSms = ?0", "bind" => [0 => $this->idSms]]);
+    if ($sms->type == "contact") {
+      $detail = \Smsxc::find([["idSms" => (string) $this->idSms], "limit" => $this->limit, "skip" => $this->page]);
+      $total = \Smsxc::count([["idSms" => (string) $this->idSms]]);
+      $data = $this->modelDataSmsContactlist($detail);
+    } else {
+      (($this->page > 0) ? $this->page = ($this->page * $this->limit) : "");
+      $sql = "SELECT * FROM smslote WHERE idSms = {$this->idSms} LIMIT {$this->limit} OFFSET {$this->page}";
+      $data = $this->db->fetchAll($sql);
+      $sql2 = "SELECT * FROM smslote WHERE idSms = {$this->idSms} ";
+      $total = $this->db->fetchAll($sql2);
+      $total = count($total);
+    }
+    $this->statics["detail"][] = $data;
+    $this->statics["detail"][] = array("total" => $total, "total_pages" => ceil($total / $this->limit));
+  }
+
+  public function modelDataSmsContactlist($detail) {
+    $arr = [];
+    foreach ($detail as $value) {
+      $obj = new \stdClass();
+      $obj->code = $value->indicative;
+      $obj->phone = $value->phone;
+      $obj->message = $value->message;
+      $obj->status = (($value->response == "0: Accepted for delivery") ? "sent" : "undelivered");
+      array_push($arr, $obj);
+    }
+    return $arr;
+  }
+
+  public function modelDataSms() {
+    $arr = array();
+    foreach ($this->data as $key) {
+      $obj = new \stdClass();
+      $obj->code = $key->code;
+      $obj->phone = $key->phone;
+      $obj->message = $key->message;
+      array_push($arr, $obj);
+    }
+    $this->statics["detail"] = $arr;
+  }
+
+  public function reportStatics() {
+    $excel = new \Sigmamovil\General\Misc\reportExcel();
+    $excel->setIdMail($this->idMail);
+    $excel->createStatics();
+    $this->getAllMessageSent();
+    $this->getAllOpen();
+    $this->clicsTotalUniques();
+    $this->bouncedTotal();
+    $this->unsubscribedTotal();
+    $this->spamTotal();
+
+    $excel->setInfo($this->statics);
+    $excel->setType($this->type);
+    switch ($this->type) {
+      case "clic":
+        $excel->SetTittle("REPORTE DE CLICS SOBRE ENLACE");
+        break;
+      case "open":
+        $excel->SetTittle("REPORTE DE APERTURAS DE CORREO");
+        break;
+      case "unsuscribe":
+        $excel->SetTittle("REPORTE CORREOS DESUSCRITOS");
+        break;
+      case "bounced":
+        $excel->SetTittle("REPORTE CORREOS REBOTADOS");
+        break;
+      case "spam":
+        $excel->SetTittle("REPORTE CORREOS QUE HAN MARCADO SPAM");
+        break;
+    }
+    $excel->setData($this->dataDetailReport());
+    $excel->setContentMail();
+    $excel->download();
+  }
+
+  public function dataDetailReport() {
+    $array = array();
+    switch ($this->type) {
+      case "clic":
+        $where = array();
+        $where['idMail'] = (string) $this->idMail;
+        if (isset($this->stringSearch)) {
+          $idAccount = \Phalcon\DI::getDefault()->get('user')->UserType->subAccount->idAccount;
+          $sql = "SELECT * FROM mail_link LEFT JOIN  mxl ON mail_link.idMail_link = mxl.idMail_link WHERE "
+                  . " idMail = {$this->idMail} AND link = '{$this->stringSearch}' AND idAccount = {$idAccount}";
+          $link = $this->db->fetchAll($sql);
+          $where['idMailLink'] = (string) $link[0]['idMail_link'];
+        }
+        (($this->page > 0) ? $this->page = ($this->page * $this->limit) : "");
+        $mxcxl = \Mxcxl::find([$where]);
+//        var_dump($where);
+//        var_dump(count($mxcxl));
+//        
+//        exit;
+        foreach ($mxcxl as $key) {
+          $obj = new \stdClass();
+          $mailLink = \Maillink::findFirst(["conditions" => "idMail_link = ?0", "bind" => [0 => $key->idMailLink]]);
+          $contact = \Contact::findFirst([["idContact" => (int) $key->idContact]]);
+          $obj->idTmpTable = $contact->idContact;
+          $obj->email = $contact->email;
+          $obj->name = $contact->name;
+          $obj->lastname = $contact->lastname;
+          $obj->indicative = $contact->indicative;
+          $obj->phone = $contact->phone;
+          $obj->link = $mailLink->link;
+          $obj->date = $key->uniqueClicks;
+          array_push($array, $obj);
+        }
+        break;
+      case "unsuscribe":
+      case "open":
+      case "spam":
+        $sql = "SELECT * FROM tmp_table";
+        $array = $this->db->fetchAll($sql);
+        break;
+      case "bounced":
+        $where = ["bounced" => ['$gte' => "1"], "idMail" => $this->idMail];
+        $bounced = \Mxc::find([$where]);
+//        var_dump(count($bounced));
+//        var_dump($where);
+//        exit;
+        $array = array();
+        foreach ($bounced as $key) {
+          $c = new \stdClass();
+          $c->name = $key->name;
+          $c->lastname = $key->lastname;
+          $c->indicative = $key->indicative;
+          $c->phone = $key->phone;
+          $c->date = $key->bounced;
+          $c->email = $key->email;
+          $sql = "SELECT * FROM bounced_code WHERE idBounced_code = {$key->bouncedCode}";
+          $data = $this->db->fetchAll($sql);
+          if ($key->bouncedCode == 10 || $key->bouncedCode == 90 || $key->bouncedCode == 200) {
+            $c->type = "hard";
+          } else {
+            $c->type = "soft";
+          }
+          $c->description = $data[0]['description'];
+          array_push($array, $c);
+        }
+        break;
+    }
+    return $array;
+  }
+
+//  public function dataDetailReportOpen() {
+//    $sql2 = "SELECT * FROM tmp_table ";
+//    $open = $this->db->fetchAll($sql2);
+//    $this->statics["info"][] = $data;
+//    $this->statics["info"][] = array("total" => count($open), "total_pages" => ceil(count($open) / $this->limit));
+//  }
+
+  public function reportStaticsSms() {
+    $excel = new \Sigmamovil\General\Misc\reportExcel();
+    $excel->createStaticsSms();
+//    echo "<pre>";
+//    var_dump($this->statics);
+//    echo "</pre>";
+//    exit();
+    $excel->setData($this->statics);
+    $excel->setTableInfoSms();
+    $excel->generatedReportSms($this->idSms);
+    $excel->download();
+  }
+
+  public function getDetailSmsReport() {
+    $sms = \Sms::findFirst(["conditions" => "idSms = ?0", "bind" => [0 => $this->idSms]]);
+    if ($sms->type == "contact") {
+      $data = \Smsxc::find([["idSms" => (string) $this->idSms]]);
+    } else {
+      $sql = "SELECT * FROM smslote WHERE idSms = {$this->idSms}";
+      $data = $this->db->fetchAll($sql);
+    }
+    $sqlcountfailed = "SELECT count(*) as total FROM sms_failed WHERE idSms = {$this->idSms}";
+    $countfailed = $this->db->fetchAll($sqlcountfailed);
+    $failed = \SmsFailed::find(array("conditions" => "idSms = ?0", "bind" => array($this->idSms)));
+
+    $this->statics["countfailed"] = $countfailed;
+    $this->statics["failed"] = $failed;
+    $this->statics["detail"] = $data;
+  }
+
+//  public function getInfoSmsReport() {
+//    $sql = "SELECT sms.name AS name, sms.startdate AS startdate, sms_category.name AS namecategory, "
+//            . " sms.target AS target "
+//            . " FROM sms  JOIN sms_category ON "
+//            . "sms_category.idSmsCategory = sms.idSmsCategory WHERE sms.idSms = {$this->idSms}";
+//    $sms = $this->db->fetchAll($sql);
+//    $this->statics["sms"] = $sms[0];
+//  }
+//
+
+  public function getAllInfoSurvey() {
+    $survey = \Survey::findFirst(array(
+                'conditions' => 'idSurvey = ?0',
+                'bind' => [$this->idSurvey]
+    ));
+    if (!$survey) {
+      throw new \InvalidArgumentException('No se encontró la encuesta solicitada, por favor valide la información');
+    }
+    $survey->SurveyContent;
+    $survey = json_decode(json_encode($survey), true);
+
+    $array[] = "encabezado";
+    $array[] = "button";
+
+    $manager = \Phalcon\DI::getDefault()->get('mongomanager');
+
+    $optionsQuestion = array(
+        'projection' => array('_id' => 0, 'idSurvey' => 1, 'idQuestion' => 1, 'component' => 1, 'question' => 1, 'count' => 1),
+    );
+
+    $query = [
+        "idSurvey" => $this->idSurvey,
+        "component" => ['$nin' => $array],
+        "deleted" => 0
+    ];
+
+    $queryQuestion = new \MongoDB\Driver\Query($query, $optionsQuestion);
+    $question = $manager->executeQuery("aio.question", $queryQuestion)->toArray();
+
+    foreach ($question as $value) {
+      $optionsAnswer = array(
+          'projection' => array('_id' => 0, 'idAnswer' => 1, 'idQuestion' => 1, 'answer' => 1, 'contacts' => 1, 'count' => 1),
+      );
+
+      $query = [
+          "idQuestion" => $value->idQuestion,
+          "deleted" => 0
+      ];
+
+      $queryAnswer = new \MongoDB\Driver\Query($query, $optionsAnswer);
+      $answer = $manager->executeQuery("aio.answer", $queryAnswer)->toArray();
+      $value->answer = $answer;
+      $std1 = new \stdClass();
+      $std2 = [];
+      $acuTotal = 0;
+      foreach ($answer as $item) {
+        $std3 = new \stdClass();
+        $std3->name = $item->answer;
+        $std3->y = $item->count;
+        $acuTotal += $item->count;
+        $std2[] = $std3;
+      }
+      $std1->name = $value->question;
+      $std1->data = $std2;
+      $value->totalAnswer = $acuTotal;
+      $value->chart = $std1;
+    }
+
+    $data = array();
+    $data['survey'] = $survey;
+    $data['questions'] = json_decode(json_encode($question), true);
+
+    return $data;
+  }
+
+  public function getAllInfoSurveyReport() {
+    $survey = \Survey::findFirst(array(
+                'conditions' => 'idSurvey = ?0',
+                'bind' => [$this->idSurvey]
+    ));
+
+
+
+    if (!$survey) {
+      throw new \InvalidArgumentException('No se encontró la encuesta solicitada, por favor valide la información');
+    }
+    $survey->SurveyContent;
+    $survey = json_decode(json_encode($survey), true);
+
+
+    $array[] = "encabezado";
+    $array[] = "button";
+
+    $manager = \Phalcon\DI::getDefault()->get('mongomanager');
+
+    $optionsQuestion = array(
+        'projection' => array('_id' => 0, 'idSurvey' => 1, 'idQuestion' => 1, 'component' => 1, 'question' => 1, 'count' => 1),
+    );
+
+    $query = [
+        "idSurvey" => $this->idSurvey,
+        "component" => ['$nin' => $array],
+        "deleted" => 0
+    ];
+
+    $queryQuestion = new \MongoDB\Driver\Query($query, $optionsQuestion);
+    $question = $manager->executeQuery("aio.question", $queryQuestion)->toArray();
+    $one = 0;
+
+    $aswerAr = array();
+
+
+//
+//
+//
+//    foreach ($question as $value) {
+//
+//      $optionsAnswer = array('projection' => array('_id' => 0, 'idAnswer' => 1, 'idQuestion' => 1, 'answer' => 1, 'contacts' => 1, 'count' => 1),);
+//      $query = ["idQuestion" => $value->idQuestion, "deleted" => 0];
+//      $queryAnswer = new \MongoDB\Driver\Query($query, $optionsAnswer);
+//      $answer = $manager->executeQuery("aio.answer", $queryAnswer)->toArray();
+//
+//
+//      $emptygeneral = new \stdClass();
+//      $emptygeneral->questions = $value->question;
+//      $emptygeneral->type = 'empty';
+//      $emptygeneral->answers = array();
+//
+//
+//
+//      foreach ($answer as $contacts) {
+//
+//
+//
+//        $counts = $contacts->count - count($contacts->contacts);
+//
+//        if ($counts > 0) {
+//          $contactemply = new \stdClass();
+//
+//          $contactemply->answer = $contacts->answer;
+//          $contactemply->count = $counts;
+//
+//          array_push($emptygeneral->answers, $contactemply);
+//        }
+//      }
+//
+//      array_push($aswerAr, $emptygeneral);
+//    }
+//        echo "<pre>";
+//        print_r($aswerAr);
+//        echo "</pre>";
+//        exit;
+
+
+    if ($one == 0) {
+      foreach ($question as $value) {
+
+        $optionsAnswer = array('projection' => array('_id' => 0, 'idAnswer' => 1, 'idQuestion' => 1, 'answer' => 1, 'contacts' => 1, 'count' => 1),);
+        $query = ["idQuestion" => $value->idQuestion, "deleted" => 0];
+        $queryAnswer = new \MongoDB\Driver\Query($query, $optionsAnswer);
+        $answer = $manager->executeQuery("aio.answer", $queryAnswer)->toArray();
+
+
+        foreach ($answer as $contacts) {
+
+
+          foreach ($contacts->contacts as $contact) {
+
+            $con = $contact;
+            $conta = \Contact::findFirst([["idContact" => (int) $con]]);
+
+
+            $contactarray = new \stdClass();
+            if ($conta == false) {
+              $contactarray->name = $con;
+              $contactarray->lastname = 'sin datos';
+              $contactarray->email = 'sin datos';
+            } else {
+              $contactarray->type = 'full';
+              $contactarray->name = $conta->name;
+              $contactarray->lastname = $conta->lastname;
+              $contactarray->email = $conta->email;
+            }
+
+            $contactarray->questions = array();
+
+            foreach ($question as $value) {
+              $idQuestion = $value->idQuestion;
+              $obj = new \stdClass();
+              $obj->question = $value->question;
+              array_push($contactarray->questions, $obj);
+              $obj->answer = array();
+
+              $optionsAnswer = array('projection' => array('_id' => 0, 'idAnswer' => 1, 'idQuestion' => 1, 'answer' => 1, 'contacts' => 1, 'count' => 1),);
+              $query = ["idQuestion" => $value->idQuestion, "deleted" => 0];
+              $queryAnswer = new \MongoDB\Driver\Query($query, $optionsAnswer);
+              $answer = $manager->executeQuery("aio.answer", $queryAnswer)->toArray();
+
+              foreach ($answer as $a) {
+                $answeridQ = $a->idQuestion;
+                if ($idQuestion == $answeridQ) {
+                  foreach ($a->contacts as $cont) {
+
+                    if ($con == $cont) {
+                      array_push($obj->answer, $a->answer);
+                    }
+                  }
+                }
+              }
+            }
+
+            array_push($aswerAr, $contactarray);
+          }
+        }
+
+        break;
+      }
+
+      $one = $one + 1;
+    }
+
+//        echo "<pre>";
+//        print_r($aswerAr);
+//        echo "</pre>";
+//        exit;
+//
+//        foreach ($question as $value) {
+//
+//
+//            $optionsAnswer = array(
+//                'projection' => array('_id' => 0, 'idAnswer' => 1, 'idQuestion' => 1, 'answer' => 1, 'contacts' => 1, 'count' => 1),
+//            );
+//
+//
+//           
+//
+//            $query = [
+//                "idQuestion" => $value->idQuestion,
+//                "deleted" => 0
+//            ];
+//
+//            $queryAnswer = new \MongoDB\Driver\Query($query, $optionsAnswer);
+//            $answer = $manager->executeQuery("aio.answer", $queryAnswer)->toArray();
+////            $value->answer = $answer;
+//            
+//  
+//            $std1 = new \stdClass();
+//
+//
+//            $std1->answer = [];
+//            for ($i = 0; $i < count($answer); $i++) {
+//                foreach ($answer[$i]->contacts as $contact) {
+//                    
+////                    $std1->answer[] = \Contact::find([["idContact" => ['$in' => $contact]]]);
+//                    $std1->answer[$contact] .= $answer[$i]->answer . ',';
+//                }
+//            }
+//            $aswerAr = array();
+//            foreach ($std1->answer as $k => $v) {
+//                $p = new \stdClass();
+//                $p->idQuestion = $answer[0]->idQuestion;
+//                $p->answer = $v;
+//                $p->contacts = [$k => $k];
+//                array_push($aswerAr, $p);
+//            }
+//
+//            $value->answer = $aswerAr;
+//            
+//           
+//        }
+
+    $data = array();
+    $data['survey'] = $survey;
+    $data['questions'] = json_decode(json_encode($question), true);
+//        var_dump($data['questions']);
+//        exit();
+    return $aswerAr;
+  }
+
+  public function reportStaticsSurvey() {
+
+    $excel = new \Sigmamovil\General\Misc\reportExcel();
+    $excel->createStaticsSurvey();
+    $excel->setData($this->getAllInfoSurveyReport());
+    $excel->generatedReportSurvey();
+    $excel->download();
+  }
+
+  public function setIdMail($idMail) {
+    $this->idMail = $idMail;
+  }
+
+  public function setIdSurvey($idSurvey) {
+    $this->idSurvey = $idSurvey;
+  }
+
+  public function getStatics() {
+    return $this->statics;
+  }
+
+  public function setPage($page) {
+    $this->page = $page;
+    return $this;
+  }
+
+  public function setType($type) {
+    $this->type = $type;
+    return $this;
+  }
+
+  public function setStringSearch($stringSearch) {
+    $this->stringSearch = $stringSearch;
+    return $this;
+  }
+
+  public function setTypeFilter($typeFilter) {
+    $this->typeFilter = $typeFilter;
+    return $this;
+  }
+
+  public function setIdSms($idSms) {
+    $this->idSms = $idSms;
+    return $this;
+  }
+
+  function setSearch($search) {
+    $this->search = $search;
+  }
+
+  public function getDataClicksMail() {
+    $idAccountSub = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+
+    $sql = "SELECT
+                    mail.idMail AS ID_MAIL,
+                    mail.idSubaccount AS ID_SUB_ACCOUNT_MAIL,
+                    mail.name AS NAME_MAIL,
+                    mail.created AS CREATED_MAIL,
+                    mail.updated AS UPDATED_MAIL,
+                    mail.totalOpening AS TOTAL_OPEN_MAIL,
+                    mail.uniqueClicks AS UNIQUE_CLICK_MAIL,
+                    mail.createdBy AS CREATEDBY_MAIL,
+                    subaccount.idSubaccount AS ID_SUBACCOUNT,
+                    subaccount.idAccount AS ID_ACCOUNT_SUBACCOUNT,
+                    account.idAccount AS IDACCOUNT_ACCOUNT,
+                    account.idAllied AS IDALLIED_ACCOUNT,
+                    account.name AS NAME_ACCOUNT
+                FROM
+                    mail
+                        inner join
+                    subaccount on subaccount.idSubaccount = mail.idSubaccount
+                        inner join
+                    account on account.idAccount = subaccount.idAccount
+                WHERE
+                    mail.idSubaccount = {$idAccountSub};";
+
+    //get id mails and total clicks links emails
+    $stringIdEmails = "";
+    $data = $this->db->fetchAll($sql);
+    $countData = count($data);
+    $countTotalClicks = 0;
+    foreach ($data as $value) {
+      $stringIdEmails .= $value['ID_MAIL'] . ',';
+      $countTotalClicks = $value['UNIQUE_CLICK_MAIL'] + $countTotalClicks;
+    }
+
+    $stringIdEmailsClear = rtrim($stringIdEmails, ',');
+
+    $sqlCountLinksMail = "SELECT 
+                                mxl.idMail,
+                                mxl.idMail_link
+                            FROM
+                                mxl
+                            WHERE
+                                idMail in ({$stringIdEmailsClear});";
+
+
+
+    //get total links for mail
+    $dataLinks = $this->db->fetchAll($sqlCountLinksMail);
+    $countDataLinks = count($dataLinks);
+    $this->statics["info"][] = array('totalemail' => $countData,
+        'totalallemailLinks' => $countDataLinks,
+        'totaluniqueclickslinks' => $countTotalClicks,
+        'dataMails' => $data);
+  }
+
+  public function getDataClickLink() {
+    $idAccountSub = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+
+    if (isset($this->search->valueDateFinal) && isset($this->search->valueDateInitial)) {
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "mail.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    } else {
+      $this->search->valueDateInitial = date('Y-m-d', strtotime('-1 day'));
+      $this->search->valueDateFinal = date('Y-m-d');
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "mail.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    }
+
+    $sql = "SELECT
+                      mail.idMail,
+                      count(mail.idMail),
+                      mail.uniqueClicks,
+                      mail.totalOpening
+                  FROM
+                      mxl
+                          INNER JOIN
+                      mail ON mail.idMail = mxl.idMail
+                          INNER JOIN
+                      mail_link ON mail_link.idMail_link = mxl.idMail_link
+                  WHERE
+                      mail.idSubaccount = {$idAccountSub}
+                      AND {$wheredate}
+                  GROUP BY
+                      1,3,4" . ";";
+    $dataClickLinkTotal = $this->db->fetchAll($sql);
+    $countClickLink = count($dataClickLinkTotal);
+    $this->statics['info'][] = array('dataClickLink' => $dataClickLinkTotal);
+  }
+
+  public function getDataTotalsCamp($dateInitial = "", $dateFinal = "") {
+    $idAccountSub = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+
+    $filDate = "";
+    if ($dateInitial != 0 && $dateFinal != 0) {
+      $dateInitial = "0";
+    }
+    $sql = "SELECT 
+                  mail.idMail
+              FROM
+                  mail
+              WHERE
+                  idSubaccount = {$idAccountSub};";
+    $dataCampTotal = $this->db->fetchAll($sql);
+    $countDataCamp = count($dataCampTotal);
+    $this->statics['info'][] = array('totalCampSubAccount' => $countDataCamp);
+  }
+
+  public function getSentMailCamp() {
+    $idAccountSub = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+
+    if (isset($this->search->valueDateFinal) && isset($this->search->valueDateInitial)) {
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "mail.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    } else {
+      $this->search->valueDateInitial = date('Y-m-d', strtotime('-1 day'));
+      $this->search->valueDateFinal = date('Y-m-d');
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "mail.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    }
+
+    $sql = "SELECT
+                  mail.idMail,
+                  mail.messagesSent
+              FROM
+                  mail
+              WHERE
+                  mail.idSubaccount = {$idAccountSub} 
+                  AND {$wheredate}";
+    $dataCampTotal = $this->db->fetchAll($sql);
+    $this->statics['info'][] = array('dataMail' => $dataCampTotal);
+  }
+
+  public function getDataTotalsLinksCamp($dateInitial = "", $dateFinal = "") {
+    $idAccountSub = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+    if (isset($this->search->valueDateFinal) && isset($this->search->valueDateInitial)) {
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "mail.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    } else {
+      $this->search->valueDateInitial = date('Y-m-d', strtotime('-1 day'));
+      $this->search->valueDateFinal = date('Y-m-d');
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "mail.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    }
+
+    if ($dateInitial != 0 && $dateFinal != 0) {
+      $dateInitial = "0";
+    }
+    $sql = "SELECT 
+                  mail.idMail AS ID_MAIL,
+                  count(mail.idMail) AS NUM_LINKS_MAIL
+              FROM
+                  mxl
+                    INNER JOIN
+                  mail on mail.idMail = mxl.idMail
+                    INNER JOIN
+                  mail_link ON mail_link.idMail_link = mxl.idMail_link
+              WHERE
+                  mail.idSubaccount = {$idAccountSub} 
+                  AND {$wheredate}
+              GROUP BY 
+                  mail.idMail;";
+    $dataCampLinkTotal = $this->db->fetchAll($sql);
+    $countDataLinkCamp = count($dataCampLinkTotal);
+    $this->statics['info'][] = array('totalLinkCamp' => $countDataLinkCamp, 'dataLinks' => $dataCampLinkTotal);
+  }
+
+  public function getDataSmsSents() {
+    $idAccountMail = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $sqlDataSms = "SELECT
+                        sms.idSms AS ID_SMS,
+                        sms.idSmsCategory AS ID_CATEGORIA,
+                        sms.idSubaccount AS ID_SUB_ACCOUNT,
+                        sms.name AS NAMA_SMS,
+                        sms.sent AS SENT_SMS,
+                        sms.total AS TOTAL_SMS,
+                        sms.created AS DATE_CREATE,
+                        sms.status AS SMS_STATUS
+                    FROM
+                        sms
+                          inner join
+                        subaccount on subaccount.idSubaccount = sms.idSubaccount
+                          inner join
+                        account on account.idAccount = subaccount.idAccount
+                    WHERE
+                        sms.idSubaccount = {$idAccountMail};";
+    //get id sms and total sents sms
+    $dataSmsData = $this->db->fetchAll($sqlDataSms);
+    $countDataSms = count($dataSmsData);
+    $countSmsSents = 0;
+    $countTotalOk = 0;
+    foreach ($dataSmsData as $value) {
+      $countSmsSents = $value['SENT_SMS'];
+      $countTotalOk = $value['TOTAL_SMS'];
+    }
+    $this->statics["info"][] = array('totalsentssms' => $countSmsSents,
+        'totalsmsok' => $countTotalOk,
+        'totalcampsms' => $countDataSms,
+        'dataSms' => $dataSmsData);
+  }
+
+  public function getTotalSms() {
+    $idAccountSms = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+    if (isset($this->search->valueDateFinal) && isset($this->search->valueDateInitial)) {
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "sms.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    } else {
+      $this->search->valueDateInitial = date('Y-m-d', strtotime('-1 day'));
+      $this->search->valueDateFinal = date('Y-m-d');
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "sms.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    }
+
+    $sql = "SELECT
+                  sms.idSms
+              FROM
+                  sms
+              WHERE
+                  sms.idSubaccount = {$idAccountSms} 
+                  AND {$wheredate};";
+    $dataSmsData = $this->db->fetchAll($sql);
+    $countDataSms = count($dataSmsData);
+    $this->statics["info"][] = array('totalCountSms' => $countDataSms, 'dataSms' => $dataSmsData);
+  }
+
+  public function getTotalSentSms() {
+    $idAccountMail = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+    if (isset($this->search->valueDateFinal) && isset($this->search->valueDateInitial)) {
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "sms.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    } else {
+      $this->search->valueDateInitial = date('Y-m-d', strtotime('-1 day'));
+      $this->search->valueDateFinal = date('Y-m-d');
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "sms.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    }
+    $sql = "SELECT
+                  sms.idSms,
+                  sms.sent
+              FROM
+                  sms
+              WHERE
+                  sms.idSubaccount = {$idAccountMail} 
+                  AND {$wheredate};";
+    $dataSmsData = $this->db->fetchAll($sql);
+    $this->statics["info"][] = array('dataSmsSent' => $dataSmsData);
+  }
+
+  public function getSmsSentTotal() {
+    $idAccountMail = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+    if (isset($this->search->valueDateFinal) && isset($this->search->valueDateInitial)) {
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "sms.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    } else {
+      $this->search->valueDateInitial = date('Y-m-d', strtotime('-1 day'));
+      $this->search->valueDateFinal = date('Y-m-d');
+      $fechainiConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateInitial . ' 00:01:01'));
+      $fechaFinConseg = date('Y-m-d H:i:s', strtotime($this->search->valueDateFinal . ' 23:59:59'));
+      $dateInitial = strtotime($fechainiConseg);
+      $dateFinal = strtotime($fechaFinConseg);
+      $wheredate = "sms.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    }
+    $sql = "SELECT
+                  sms.idSms,
+                  sms.sent,
+                  sms.total
+              FROM
+                  sms
+              WHERE
+                  sms.idSubaccount = {$idAccountMail} 
+                  AND {$wheredate};";
+    $dataSmsData = $this->db->fetchAll($sql);
+    $this->statics["info"][] = array('dataSmsSent' => $dataSmsData);
+  }
+
+  public function getChargeInitialCamp() {
+    $idAccountMail = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $sql = "SELECT 
+                (SELECT 
+                        COUNT(*)
+                    FROM
+                        sms
+                    WHERE
+                        sms.idSubaccount = {$idAccountMail}) AS countSms,
+                (SELECT 
+                        COUNT(*)
+                    FROM
+                        mail
+                    WHERE
+                        mail.idSubaccount = {$idAccountMail}) AS countMail;";
+    $dataSmsData = $this->db->fetchAll($sql);
+    $this->statics["info"][] = array('dataCamp' => $dataSmsData);
+  }
+
+  public function getDataMailDate($timeValue, $timespecific) {
+    $idAccountMail = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+    $dateInitial = "";
+    $dateFinal = "";
+
+    if ($timeValue == 1) {
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = 1;
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI . ' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = cal_days_in_month(CAL_GREGORIAN, $monthF, $yearF);
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF . ' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    } else if ($timeValue == 2) {
+
+      $yearI = date('Y');
+      $monthI = date('m') - 1;
+      $dayI = '1';
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI . ' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m') - 1;
+      $dayF = cal_days_in_month(CAL_GREGORIAN, $monthF, $yearF);
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF . ' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    } else if ($timeValue == 3) {
+
+      $yearI = date('Y') - 1;
+      $monthI = 1;
+      $dayI = '1';
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI . ' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y') - 1;
+      $monthF = 12;
+      $dayF = cal_days_in_month(CAL_GREGORIAN, $monthF, $yearF);
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF . ' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+
+    $this->db->execute('SET lc_time_names = "es_MX";');
+    $wheredate = "mail.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    $sql = "SELECT
+              sum(mail.messagesSent) AS messagesSent,
+              date_format(from_unixtime(mail.created),'%{$timespecific}') AS timeSpecific
+            FROM
+              mail
+            WHERE
+              mail.idSubaccount = {$idAccountMail} 
+              AND {$wheredate}
+            group by 2
+            order by mail.created asc;";
+
+    $dataCampLinkTotal = $this->db->fetchAll($sql);
+    $this->db->execute('SET lc_time_names = "en_US";');
+    $countDataLinkCamp = count($dataCampLinkTotal);
+    $this->statics['info'][] = array('totalLinkCamp' => $countDataLinkCamp, 'dataLinks' => $dataCampLinkTotal);
+  }
+
+  public function getDateDateDay($timeValue, $timespecific) {
+    $idAccountMail = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+    $dateInitial = "";
+    $dateFinal = "";
+
+    if ($timeValue == 4) {
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = date('d');
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI . ' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d');
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF . ' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    } else if ($timeValue == 5) {
+
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = date('d') - 1;
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI . ' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      //$dayF = cal_days_in_month(CAL_GREGORIAN, $monthF, $yearF);
+      $dayF = date('d') - 1;
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF . ' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    } else if ($timeValue == 6) {
+
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = '1';
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI . ' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d');
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF . ' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+
+    $this->db->execute('SET lc_time_names = "es_MX";');
+    $wheredate = "mail.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    $sql = "SELECT
+              sum(mail.messagesSent) AS messagesSent,
+              date_format(from_unixtime(mail.created),'%{$timespecific}') AS timeSpecific
+            FROM
+              mail
+            WHERE
+              mail.idSubaccount = {$idAccountMail} 
+              AND {$wheredate}
+            group by 2
+            order by mail.created asc;";
+
+    $dataCampLinkTotal = $this->db->fetchAll($sql);
+    $this->db->execute('SET lc_time_names = "en_US";');
+    $countDataLinkCamp = count($dataCampLinkTotal);
+    $this->statics['info'][] = array('totalLinkCamp' => $countDataLinkCamp, 'dataLinks' => $dataCampLinkTotal);
+  }
+
+  public function staticOpenCamp($timeValue, $timespecific) {
+    $idAccountMail = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+    $dateInitial = "";
+    $dateFinal = "";
+    if($timeValue==7){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = date('d');
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d');
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    else if($timeValue==8){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = date('d')-1;
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d')-1;
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    else if($timeValue==9){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = 1;
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d');
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+      
+    $sql = "SELECT 
+              idMail
+            FROM
+              mail
+            WHERE
+              idSubaccount = {$idAccountMail};";
+    $dataIdMail = $this->db->fetchAll($sql);
+    $arraySingle = [];
+    $count = 0;
+    foreach ($dataIdMail as $value) {
+      $arraySingle[$count] = (string) $value['idMail'];
+      $count++;
+    }
+    
+    $datos = array
+        (
+          array(
+              '$match' => array(
+                  "idMail" => array(
+                      '$in' => $arraySingle
+                  ),
+                  'open' => array(
+                      '$gte' => $dateInitial,
+                      '$lt' => $dateFinal
+                  )
+              )
+          ),
+          array
+              (
+              '$group' => array
+                (
+                  '_id'=>array
+                    (
+                      '$dateToString'=>array
+                        (
+                          'format'=>"'%{$timespecific}'",
+                          'date'=>array
+                            (
+                              '$add'=>[
+                                  new \MongoDate(0),
+                                  array
+                                  (
+                                    '$multiply'=>[1000,'$open']
+                                  )
+                              ]
+                            )
+                        )
+                    ),
+                  'total'=>array('$sum'=>1)
+                )
+              ),
+          array
+            (
+              '$project' => array
+                (
+                  'messagesSent' => '$total',
+                  'timeSpecific' => '$_id'
+                )
+            ),
+          array
+            (
+            '$sort' => array
+                (
+                'open' => 1
+            )
+          )
+    );
+    $open = \Mxc::aggregate($datos);
+    $this->statics['info'][] = array('dataLinks' => $open["result"]);
+  }
+  
+  public function staticsUniqueClicks($timeValue, $timespecific){
+    $idAccountMail = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+    $dateInitial = "";
+    $dateFinal = "";
+    if($timeValue==10){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = date('d');
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d');
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    else if($timeValue==11){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = date('d')-1;
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d')-1;
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    else if($timeValue==12){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = 1;
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d');
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    $this->db->execute('SET lc_time_names = "es_MX";');
+    $wheredate = "mail.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    $sql = "SELECT 
+              idMail
+            FROM
+              mail
+            WHERE
+              idSubaccount = {$idAccountMail};";
+    $dataIdMail = $this->db->fetchAll($sql);
+    $arraySingle = [];
+    $count = 0;
+    foreach ($dataIdMail as $value) {
+      $arraySingle[$count] = (string) $value['idMail'];
+      $count++;
+    }
+    
+    $arrayDatos = array(
+                    array(
+                        'idMail'=>array(
+                            '$in'=>$arraySingle
+                        ),
+                        'uniqueClicks'=>array(
+                            '$gte'=>$dateInitial,
+                            '$lt'=>$dateFinal
+                        )
+                    ),
+                    array(
+                        'idMail'=>1,
+                        'uniqueClicks'=>1
+                    )
+                  );
+    $open = \Mxc::find($arrayDatos);
+    //var_dump($open);exit;
+    $countId = 0;
+    $arrayData = array();
+    foreach ($open as $key => $value) {
+      $arrayData[$key] =  array(
+        'idMail' => $value->idMail,
+        'countId' => $countId,
+        'uniqueClicks' => date("{$timespecific}",$value->uniqueClicks)
+      );
+    }
+    
+    $arrayDataRepuest = array();
+    foreach ($arrayData as $key => $value) {
+      $countIdMail = $this->countIdMailRepeat($arrayData, $value['idMail'], $value['uniqueClicks']);
+      $arrayDataRepuest[$key] = array('messagesSent'=>$countIdMail, 'timeSpecific'=>$value['uniqueClicks']);
+    }
+    
+    $countDataLinkCamp = count($arrayCount);
+    $this->statics['info'][] = array('totalLinkCamp' => $countDataLinkCamp, 'dataLinks' => $arrayDataRepuest);
+  }
+  
+  public function countIdMailRepeat($arrayToFind, $idMail, $hourMail){
+    $countId = 0;
+    foreach ($arrayToFind as $key => $value) {
+      if($idMail==$arrayToFind[$key]['idMail']&&$arrayToFind[$key]['uniqueClicks']==$hourMail){
+        $countId++;
+      }
+    }
+    return $countId;
+  }
+  
+  public function getSmsSentsForDay($timeValue, $timespecific){
+    $idAccountMail = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+    $dateInitial = "";
+    $dateFinal = "";
+    if($timeValue==13){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = date('d');
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d');
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    else if($timeValue==14){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = date('d')-1;
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d')-1;
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    else if($timeValue==15){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = 1;
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d');
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    $this->db->execute('SET lc_time_names = "es_MX";');
+    $wheredate = "sms.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    $sql = "SELECT
+              sum(sms.sent) AS messagesSent,
+              date_format(from_unixtime(sms.created),'%{$timespecific}') AS timeSpecific
+            FROM
+              sms
+            WHERE
+              sms.idSubaccount = {$idAccountMail} 
+              AND {$wheredate}
+            group by 2
+            order by sms.created asc;";
+
+    $dataCampLinkTotal = $this->db->fetchAll($sql);
+    $this->db->execute('SET lc_time_names = "en_US";');
+    $countDataLinkCamp = count($dataCampLinkTotal);
+    $this->statics['info'][] = array('totalLinkCamp' => $countDataLinkCamp, 'dataLinks' => $dataCampLinkTotal, 'sql'=>$sql);
+  }
+  
+  public function getCampSmsForDay($timeValue, $timespecific){
+    $idAccountMail = \Phalcon\DI::getDefault()->get('user')->usertype->idSubaccount;
+    $wheredate = " 1 = 1 ";
+    $dateInitial = "";
+    $dateFinal = "";
+    if($timeValue==16){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = date('d');
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d');
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    else if($timeValue==17){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = date('d')-1;
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d')-1;
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    else if($timeValue==18){
+      $yearI = date('Y');
+      $monthI = date('m');
+      $dayI = 1;
+      $dateStringI = $yearI . '-' . $monthI . '-' . $dayI;
+      $dateIniUnix = date('Y-m-d H:i:s', strtotime($dateStringI .' 00:01:01'));
+      $dateInitial = strtotime($dateIniUnix);
+
+      $yearF = date('Y');
+      $monthF = date('m');
+      $dayF = date('d');
+      $dateStringF = $yearF . '-' . $monthF . '-' . $dayF;
+      $dateFinUnix = date('Y-m-d H:i:s', strtotime($dateStringF .' 23:59:59'));
+      $dateFinal = strtotime($dateFinUnix);
+    }
+    
+    $this->db->execute('SET lc_time_names = "es_MX";');
+    $wheredate = "sms.created BETWEEN '{$dateInitial}' AND '{$dateFinal}' ";
+    $sql = "SELECT
+              COUNT(sms.idSms) AS messagesSent,
+              date_format(from_unixtime(sms.created),'%{$timespecific}') AS timeSpecific
+            FROM
+              sms
+            WHERE
+              sms.idSubaccount = {$idAccountMail} 
+              AND {$wheredate}
+            group by 2
+            order by sms.created asc;";
+
+    $dataCampLinkTotal = $this->db->fetchAll($sql);
+    $this->db->execute('SET lc_time_names = "en_US";');
+    $countDataLinkCamp = count($dataCampLinkTotal);
+    $this->statics['info'][] = array('totalLinkCamp' => $countDataLinkCamp, 'dataLinks' => $dataCampLinkTotal, 'sql'=>$sql);
+  
+  }
+  //funcion empleada guardar la data que almacenara la informacion de estadisticas de campaña automatica
+  public function getConfiguration() {
+    return $this->configuration;
+  }
+//funcion que se encarga de crear la data de la estadistica de campañas automaticas
+  public function getallConfiguration($idAutomaticcampaign) {
+
+    $automaticCampaignConfiguration = \AutomaticCampaignConfiguration::findFirst(
+                    array("conditions" => "idAutomaticCampaign = ?0",
+                        "bind" => array($idAutomaticcampaign)));
+
+    $automaticCampaign = \AutomaticCampaign::findFirst(array(
+                'conditions' => 'idAutomaticCampaign = ?0',
+                'bind' => [$idAutomaticcampaign]));
+
+    $configuration = json_decode($automaticCampaignConfiguration->configuration);
+
+    $automaticCampaignStatictis = new \stdClass();
+    $dataStatictisCampaign = new \stdClass();
+    $arrayStatictis = array();
+    $cont = 0;
+
+    $prueba = null;
+
+    // for de los nodos de la campaña automatica
+    for ($index = 0; $index < count($configuration->nodes); $index++) {
+
+      $statictisData = new \stdClass();
+
+      $totalOpening = 0;
+      $totalClicks = 0;
+      $spam = 0;
+      $bounced = 0;
+      $sent = 0;
+      $Notshipped = 0;
+     
+      $primary = false;
+
+      $automaticCampaignStatictis = $configuration;
+      $automaticCampaignStep = \AutomaticCampaignStep::find(array("conditions" => "idAutomaticCampaign = ?0 and idNode= ?1",
+                  "bind" => array($idAutomaticcampaign, $configuration->nodes[$index]->id)));
+
+      if ($configuration->nodes[$index]->method == "primary") {
+
+        $automaticCampaignObj = new \Sigmamovil\General\Misc\AutomaticCampaignObj($automaticCampaign, $automaticCampaignConfiguration);
+        $FirstNode = $automaticCampaignObj->getNode(0);
+        $target = json_decode($automaticCampaignObj->transformTarget($FirstNode->sendData));
+        $contacList = \Contactlist::find(array("conditions" => "idContactlist = ?0 ",
+                    "bind" => array($target->contactlists[0]->idContactlist)))[0];
+        $statictisData->typeRecipients = $FirstNode->sendData->list->name;
+        $statictisData->listcontacname = $target->contactlists[0]->name;
+        $statictisData->totalContac = $contacList->cactive;
+        $statictisData->nodeTitle = "Información del nodo";
+        $statictisData->nodeType = $configuration->nodes[$index]->method;
+        $primary = true;
+        $statictisData->primary = $primary;
+        
+        $automaticCampaignStatictis->nodes[$index]->statictis = $statictisData;
+      }
+      if ($configuration->nodes[$index]->method == "actions") {
+
+        $statictisData->selectactionname = $configuration->nodes[$index]->sendData->selectAction->name;
+        $statictisData->timename = $configuration->nodes[$index]->sendData->time->name;
+        $statictisData->timetwoname = $configuration->nodes[$index]->sendData->timetwo->name;
+        $statictisData->nodeTitle = "Información del nodo";
+        $statictisData->nodeType = $configuration->nodes[$index]->method;
+
+
+        if ($configuration->nodes[$index]->sendData->selectAction->id == 6) {
+          if (isset($configuration->nodes[$index]->sendData->quest)) {
+            $statictisData->question = $configuration->nodes[$index]->sendData->quest->question;
+          }
+
+          if ($configuration->nodes[4]->sendData->condition->id == 1) {
+            $statictisData->condition = $configuration->nodes[$index]->sendData->condition->name;
+            $statictisData->answer = $configuration->nodes[$index]->sendData->answer->answer;
+          }
+        }
+
+        $automaticCampaignStatictis->nodes[$index]->statictis = $statictisData;
+      }
+      if ($configuration->nodes[$index]->method == "time") {
+        $statictisData->timeName = $configuration->nodes[$index]->sendData->time->name;
+        $statictisData->timetwoName = $configuration->nodes[$index]->sendData->timetwo->name;
+        $statictisData->text = $configuration->nodes[$index]->sendData->text;
+        $statictisData->textTitle = $configuration->nodes[$index]->sendData->textTitle;
+        $statictisData->nodeTitle = "Información del nodo";
+        $statictisData->nodeType = $configuration->nodes[$index]->method;
+
+        $automaticCampaignStatictis->nodes[$index]->statictis = $statictisData;
+      }
+      if ($configuration->nodes[$index]->method == "email") {
+
+        if (count($automaticCampaignStep) > 0) {
+          foreach ($automaticCampaignStep as $value) {
+            $totalOpening = $totalOpening + $value->totalOpening;
+            $totalClicks = $totalClicks + $value->totalClicks;
+            if ($value . status == "sent") {
+              $sent = $sent + 1;
+            }
+            if ($value . status != null) {
+              $Notshipped = $Notshipped + 1;
+            }
+            $bounced = $bounced + $automaticCampaignStep->bounced;
+            $spam = $spam + $value->spam;
+          }
+
+          $statictisData->totalOpening = $totalOpening;
+          $statictisData->totalClicks = $totalClicks;
+          $statictisData->sent = $sent;
+          $statictisData->Notshipped = $Notshipped;
+          $statictisData->bounced = $bounced;
+          $statictisData->spam = $spam;
+          $statictisData->nodeTitle = "Estadistica";
+          $statictisData->nodeType = $configuration->nodes[$index]->method;
+
+
+          $automaticCampaignStatictis->nodes[$index]->statictis = $statictisData;
+        } else {
+          $sql = "SELECT
+                        quantitytarget,
+                        uniqueClicks,
+                        uniqueOpening,
+                        totalClicks,
+                        totalOpening,
+                        spam,
+                        bounced,
+                        messagesSent
+                    FROM
+                        mail
+                    WHERE
+                        idAutomaticCampaign ={$idAutomaticcampaign}";
+          $mail = (object) $this->db->fetchAll($sql)[0];
+
+          $statictisData->totalOpening = $mail->totalOpening;
+          $statictisData->totalClicks = $mail->totalClicks;
+          $statictisData->sent = $mail->messagesSent;
+          $statictisData->Notshipped = $mail->quantitytarget - $mail->messagesSent;
+          $statictisData->bounced = $mail->bounced;
+          $statictisData->spam = $mail->spam;
+          $statictisData->nodeTitle = "Estadistica";
+          $statictisData->nodeType = $configuration->nodes[$index]->method;
+
+          $automaticCampaignStatictis->nodes[$index]->statictis = $statictisData;
+        }
+      }
+      if ($configuration->nodes[$index]->method == "sms") {
+        if (count($automaticCampaignStep) > 0) {
+
+          foreach ($automaticCampaignStep as $value) {
+            if ($value->statusSms == "delivered") {
+              $sent = $sent + 1;
+            } else if ($value->statusSms == "undelivered") {
+              $Notshipped = $Notshipped + 1;
+            }
+          }
+
+          $statictisData->sent = $sent;
+          $statictisData->Notshipped = $Notshipped;
+          $statictisData->nodeTitle = "Estadistica";
+          $statictisData->nodeType = $configuration->nodes[$index]->method;
+
+          $automaticCampaignStatictis->nodes[$index]->statictis = $statictisData;
+        } else {
+          $sql = "SELECT
+                        sms.sent,
+                        sms.quantity,
+                        count(sms_failed.idSmsfailed) sms_failed
+                    FROM
+                        sms
+                    INNER JOIN sms_failed ON sms.idSms = sms_failed.idSms
+                    WHERE
+                        sms.idAutomaticCampaign = {$idAutomaticcampaign}
+                    AND sms_failed.idSms = sms.idSms";
+          $sms = (object) $this->db->fetchAll($sql)[0];
+
+          $statictisData->sent = $sms->sent;
+          $statictisData->Notshipped = $sms->sms_failed;
+          $statictisData->sms = true;
+          $statictisData->nodeTitle = "Estadistica";
+          $statictisData->nodeType = $configuration->nodes[$index]->method;
+
+          if (!isset($statictisData->sent)) {
+            $statictisData->sent = 0;
+          }
+
+          $automaticCampaignStatictis->nodes[$index]->statictis = $statictisData;
+        }
+      }
+      if ($configuration->nodes[$index]->method == "survey") {
+        if (count($automaticCampaignStep) > 0) {
+          foreach ($automaticCampaignStep as $value) {
+            $totalOpening = $totalOpening + $value->totalOpening;
+            $totalClicks = $totalClicks + $value->totalClicks;
+            if ($value->status == "sent") {
+              $sent = $sent + 1;
+            }
+            if ($value->status != null) {
+              $Notshipped = $Notshipped + 1;
+            }
+            $bounced = $bounced + $value->bounced;
+            $spam = $spam + $value->spam;
+          }
+
+          $statictisData->totalOpening = $totalOpening;
+          $statictisData->totalClicks = $totalClicks;
+          $statictisData->sent = $sent;
+          $statictisData->Notshipped = $Notshipped;
+          $statictisData->bounced = $bounced;
+          $statictisData->spam = $spam;
+          $statictisData->nodeTitle = "Estadistica";
+          $statictisData->nodeType = $configuration->nodes[$index]->method;
+
+          $automaticCampaignStatictis->nodes[$index]->statictis = $statictisData;
+
+//          $manager = \Phalcon\DI::getDefault()->get('mongomanager');
+//          $optionsQuestion = array(
+//              'projection' => array('_id' => 0, 'idQuestion' => 1),
+//          );
+//          $query = [
+//              "idSurvey" => $configuration->nodes[3]->sendData->publicsurvey->idSurvey,
+//              "deleted" => 0
+//          ];
+//          $queryQuestion = new \MongoDB\Driver\Query($query, $optionsQuestion);
+//          $questions = (array) $manager->executeQuery("aio.question", $queryQuestion)->toArray();
+//          $contacs = NULL;
+//
+//          if ($configuration->nodes[0]->sendData->list->name == "Listas de contactos") {
+//            $sql = "SELECT
+//                          idContact
+//                      FROM
+//                          cxcl
+//                      WHERE
+//                          idContactlist ={$configuration->nodes[0]->sendData->selecteds[0]->idContactlist}";
+//
+//            $contacs = (array) $this->db->fetchAll($sql);
+//          }
+        } else {
+          $sql = "SELECT
+                        quantitytarget,
+                        uniqueClicks,
+                        uniqueOpening,
+                        totalClicks,
+                        totalOpening,
+                        spam,
+                        bounced,
+                        messagesSent
+                    FROM
+                        mail
+                    WHERE
+                        idAutomaticCampaign ={$idAutomaticcampaign}";
+          $mail = (object) $this->db->fetchAll($sql)[0];
+
+          $statictisData->totalOpening = $mail->totalOpening;
+          $statictisData->totalClicks = $mail->totalClicks;
+          $statictisData->sent = $mail->messagesSent;
+          $statictisData->Notshipped = $mail->quantitytarget - $mail->messagesSent;
+          $statictisData->bounced = $mail->bounced;
+          $statictisData->spam = $mail->spam;
+          $statictisData->nodeTitle = "Estadistica";
+          $statictisData->nodeType = $configuration->nodes[$index]->method;
+
+          $automaticCampaignStatictis->nodes[$index]->statictis = $statictisData;
+        }
+      }
+    }
+
+    $this->configuration = json_encode($automaticCampaignStatictis);
+  }
+
+}

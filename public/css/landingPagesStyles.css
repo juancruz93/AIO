@@ -1,0 +1,59 @@
+.body-errors {
+    background-color: #093341;
+    background-repeat: repeat;
+    font-family: 'Questrial';
+    margin: 0px;
+    padding: 0px;
+    /* background-image: url('../images/stars.png') */
+    background-image: url('../images/stars.png')
+}
+
+.errorPage {
+    max-width: 1000px;
+    margin: 0px auto;
+    padding: 150px 10px 0 10px;
+}
+
+.errorPage-container {
+    width: 100%;
+    display: flex;
+    -webkit-box-align: center;
+    align-items: center;
+    -webkit-box-pack: center;
+    justify-content: center;
+    -webkit-box-orient: vertical;
+    flex-direction: column;
+    align-content: center;
+}
+
+.errorPage-topImage {
+    width: 100%;
+    display: flex;
+    -webkit-box-pack: center;
+    justify-content: center;
+}
+
+.errorPage-image {
+    max-width: 340px;
+    margin: 0;
+}
+
+.errorPage-image img {
+    width: 100%;
+    margin: 0;
+}
+
+.errorPage-text{
+    color: #fff;
+    text-align: center;
+}
+
+.errorPage-text h3{
+    font-size: 43px;
+    margin: 0;
+}
+
+.errorPage-text p{
+    font-size: 18px;
+}
+

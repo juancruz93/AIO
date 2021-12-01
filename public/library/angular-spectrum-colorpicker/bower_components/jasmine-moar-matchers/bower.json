@@ -1,0 +1,27 @@
+{
+  "name": "jasmine-moar-matchers",
+  "version": "0.0.3",
+  "authors": [
+    "Hannes Diercks"
+  ],
+  "description": "Some additional Jasmine 2.0 Matchers.",
+  "main": [
+    "lib/promises.js",
+    "lib/toAngularEqual.js",
+    "lib/toBeInstanceOf.js",
+    "lib/toBeTypeOf.js"
+  ],
+  "ignore": [
+    "test",
+    ".travis.yml",
+    "package.json"
+  ],
+  "keywords": [
+    "jasmine",
+    "matcher"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "angular": "~1.3.0"
+  }
+}

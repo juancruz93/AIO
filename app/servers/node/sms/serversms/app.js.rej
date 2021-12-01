@@ -1,0 +1,32 @@
+diff a/app/servers/node/sms/serversms/app.js b/app/servers/node/sms/serversms/app.js	(rejected hunks)
+@@ -10,21 +10,21 @@
+ 
+ var mysql = require('mysql'),
+ // Crea la conexion a la base de datos
+-// connection = mysql.createConnection({
+-//   host: '192.168.18.200',
+-//   port: 3306,
+-//   user: 'root',
+-//   password: '',
+-//   database: 'aio'
+-// }),
+-        //server
+         connection = mysql.createConnection({
+-          host: 'localhost',
++          host: '192.168.18.13',
+           port: 3306,
+           user: 'root',
+           password: '',
+           database: 'aio'
+         }),
++        //server
++//        connection = mysql.createConnection({
++//          host: 'localhost',
++//          port: 3306,
++//          user: 'root',
++//          password: '',
++//          database: 'aio'
++//        }),
+ // Array que guarda los usuarios conectados
+         connectionsArray = [],
+ // Intervalo de tiempo con el que se estaran haciendo peticiones a la base de datos

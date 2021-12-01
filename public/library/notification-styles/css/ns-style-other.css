@@ -1,0 +1,113 @@
+@-webkit-keyframes animFade {
+	0% { opacity: 0; }
+	100% { opacity: 1; }
+}
+
+@keyframes animFade {
+	0% { opacity: 0; }
+	100% { opacity: 1; }
+}
+
+/* Box spinner (from http://tobiasahlin.com/spinkit/) */
+.ns-effect-boxspinner {
+	width: 250px; 
+	height: 90px;
+	top: 30px;
+	right: 30px;
+	background: #5699bc;
+	font-weight: 700;
+	border-radius: 5px;
+	outline: 1px solid transparent;
+	
+}
+
+.ns-effect-boxspinner .ns-close::before,
+.ns-effect-boxspinner .ns-close::after {
+	background: #27546c;
+}
+
+.ns-effect-boxspinner .ns-close:hover::before,
+.ns-effect-boxspinner .ns-close:hover::after {
+	background: #fff;
+}
+
+.ns-effect-boxspinner a {
+	color: #27546c;
+}
+
+.ns-effect-boxspinner a:hover {
+	color: #fff;
+}
+
+.ns-effect-boxspinner .ns-box-inner,
+.ns-effect-boxspinner .ns-close {
+	opacity: 0;
+}
+
+.ns-effect-boxspinner.ns-show {
+	-webkit-animation-name: animFade, animSpin, animExpand;
+	animation-name: animFade, animSpin, animExpand;
+	-webkit-animation-duration: 0.9s, 1.2s, 0.3s;
+	animation-duration: 0.9s, 1.2s, 0.3s;
+	-webkit-animation-delay: 0s, 0s, 2.4s;
+	animation-delay: 0s, 0s, 2.4s;
+	-webkit-animation-iteration-count: 1, 2, 1;
+	animation-iteration-count: 1, 2, 1;
+	-webkit-animation-timing-function: ease-in-out, ease, cubic-bezier(0.7,0,0.3,1);
+	animation-timing-function: ease-in-out, ease, cubic-bezier(0.7,0,0.3,1);
+	-webkit-animation-fill-mode: forwards, forwards, both;
+	animation-fill-mode: forwards, forwards, both;
+}
+
+@-webkit-keyframes animSpin {
+	0% { -webkit-transform: perspective(120px) rotateY(180deg) rotateX(180deg); width: 70px; height: 70px; }
+	50% { -webkit-transform: perspective(120px) rotateY(180deg); }
+	100% { -webkit-transform: perspective(120px); width: 70px; height: 70px; }
+}
+
+@keyframes animSpin {
+	0% { -webkit-transform: perspective(120px) rotateY(180deg) rotateX(180deg); transform: perspective(120px) rotateY(181deg) rotateX(181deg); width: 70px; height: 70px;}
+	50% { -webkit-transform: perspective(120px) rotateY(180deg); transform: perspective(120px) rotateY(181deg); }
+	100% { -webkit-transform: perspective(120px); transform: perspective(120px); width: 70px; height: 70px; }
+}
+
+@-webkit-keyframes animExpand {
+	0% { width: 70px; height: 70px; }
+	100% { width: 250px; height: 90px; }
+}
+
+@keyframes animExpand {
+	0% { width: 70px; height: 70px; }
+	100% { width: 250px; height: 90px; }
+}
+
+.ns-effect-boxspinner .ns-box-inner {
+	backface-visibility: hidden;
+}
+
+.ns-effect-boxspinner.ns-show .ns-box-inner,
+.ns-effect-boxspinner.ns-show .ns-close,
+.ns-effect-boxspinner.ns-hide {
+	-webkit-animation-name: animFade;
+	animation-name: animFade;
+	-webkit-animation-duration: 0.3s;
+	animation-duration: 0.3s;
+}
+
+.ns-effect-boxspinner.ns-show .ns-box-inner,
+.ns-effect-boxspinner.ns-show .ns-close {
+	opacity: 0;
+	-webkit-animation-fill-mode: both;
+	animation-fill-mode: both;
+	-webkit-animation-delay: 2.75s;
+	animation-delay: 2.75s;
+}
+
+.ns-effect-boxspinner.ns-hide {
+	opacity: 1;
+}
+
+.ns-effect-boxspinner>.ns-box-inner> p {
+    font-size: 1.1em !important;
+    margin: 12px !important;
+}

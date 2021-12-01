@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>E2E Tests</title>
+  <!-- [[src/less]] -->
+  <link rel="stylesheet" href="/bower_components/spectrum/spectrum.css" />
+</head>
+<body ng-init="disabled = false">
+  <!--       THIS IS NOT A SANDBOX, IT'S FOR E2E TESTING!      -->
+  <!-- PLEASE USE demo/index.html IF YOU'D LIKE TO PLAY AROUND -->
+
+  <input type="text" name="color" ng-model="color" id="color">
+  <label for="disabled">Disabled:</label><input type="checkbox" id="disabled" ng-model="disabled">
+
+  <spectrum-colorpicker
+    ng-model="color"
+    format="'hex'"
+    disabled="disabled"
+    options="{
+      flat: false,
+      showInput: true,
+      showAlpha: true,
+      showPalette: true
+    }">
+  </spectrum-colorpicker>
+
+  <!-- [[src/js]] -->
+  <script type="text/javascript" src="app.js"></script>
+</body>
+</html>

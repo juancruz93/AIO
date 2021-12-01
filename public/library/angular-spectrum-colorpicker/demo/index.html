@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" ng-app="colorpickerApp">
+<head>
+  <meta charset="utf-8">
+  <title>My angular spectrum demo</title>
+
+  <link rel="stylesheet" href="../bower_components/spectrum/spectrum.css" />
+  <link rel="stylesheet" href="../demo/styles.css" />
+  <!-- [[src/less]] -->
+  <!-- [[src/js]] -->
+  <script src="../bower_components/jquery/dist/jquery.js"></script>
+  <script src="../bower_components/angular/angular.js"></script>
+  <script src="../dist/angular-spectrum-colorpicker.js"></script>
+  <script src="../bower_components/spectrum/spectrum.js"></script>
+  <script src="../demo/app.js"></script>
+</head>
+<body ng-controller="ColorPickerCtrl" ng-init="color = 'red'; trigger = 'theTrigger'">
+
+  <h1 style="color: {{color}}">My Angular spectrum demo</h1>
+
+
+  <input type="text" name="color" ng-model="color">
+  <label id="theTrigger">Click here to open colorpicker</label>
+
+  <spectrum-colorpicker
+  trigger-id="{{trigger}}"
+  ng-model="color"
+  format="'hsl'"
+  on-change="onChange(color)"
+  options="{
+    showInput: true,
+    showAlpha: true,
+    allowEmpty: true,
+    showPalette: true,
+    palette: [['black', 'white', 'blanchedalmond'],['rgb(255, 128, 0);', 'hsv 100 70 50', 'lightyellow']]
+  }">
+  </spectrum-colorpicker>
+
+  <br>
+  <button ng-click="color='#ffffff'">set color to #ffffff</button>
+
+</body>
+</html>

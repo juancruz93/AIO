@@ -1,0 +1,16 @@
+{
+    "pages": {
+        "index": {
+            "blocks": [
+                {
+                    "frames_content": "<div id=\"page\" class=\"page\">\n    \n    \t<div class=\"footerWrapper\" id=\"footer3\">\n    \n    \t<div class=\"item footer dark\">\n    \t    \t\n    \t\t<div class=\"container\">\n   \t\t\t\t<div class=\"row\">\n \t\t\t\t\t<div class=\"col-md-6 col-md-offset-3 text-center social\">\n \t\t\t\t\t\t\n                        <div class=\"editContent\" data-selector=\".editContent\" style=\"color: rgb(255, 255, 255); font-size: 14px; background-color: rgba(0, 0, 0, 0); font-family: Lato, Helvetica, Arial, sans-serif; outline: none; cursor: inherit;\">\n \t\t\t\t\t\t \n                            <h3>%%NAME%%, %%NAMEAUTHOR%%<\/h3>\n<div><h4>Cont\u00e1ctenos<\/h4><div><b>%%CITY%%, %%ADDRESS%%<\/b><\/div><div>%%WEBSITE%%<\/div><div>%%EMAIL%%<\/div><div>%%NIT%%<br><\/div><\/div>\n                        <\/div>\n                        \n \t\t\t\t\t\t<a href=\"#\" class=\"fa fa-facebook-square\" data-selector=\".social a\" style=\"\"><\/a>\n \t\t\t\t\t\t<a href=\"#\" class=\"fa fa-twitter-square\" data-selector=\".social a\" style=\"outline: none; cursor: inherit;\"><\/a>\n \t\t\t\t\t\t<a href=\"#\" class=\"fa fa-linkedin-square\" data-selector=\".social a\" style=\"outline: none; cursor: inherit;\"><\/a>\n \t\t\t\t\t\t<a href=\"#\" class=\"fa fa-github-square\" data-selector=\".social a\" style=\"\"><\/a>\n \t\t\t\t\t\t<a href=\"#\" class=\"fa fa-google-plus-square\" data-selector=\".social a\" style=\"\"><\/a>\n \t\t\t\t\t\t<a href=\"#\" class=\"fa fa-pinterest-square\" data-selector=\".social a\" style=\"\"><\/a>\n \t\t\t\t\t\t<a href=\"#\" class=\"fa fa-reddit-square\" data-selector=\".social a\" style=\"\"><\/a>\n \t\t\t\t\t<\/div><!-- \/.col -->\n   \t\t\t\t<\/div><!-- \/.row -->\n   \t\t\t<\/div>\n    \t\t    \t\n    \t<\/div><!-- \/.item -->\n    \t\n    \t<\/div><!-- \/.footerWrapper -->\n    \n    <\/div>",
+                    "frames_sandbox": "false",
+                    "frames_loaderFunction": "",
+                    "frames_height": "349",
+                    "frames_original_url": "..\/..\/library\/htmlbuilder\/elements\/original\/footer3.html"
+                }
+            ]
+        }
+    },
+    "responsiveMode": "desktop"
+}

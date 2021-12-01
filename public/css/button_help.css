@@ -1,0 +1,264 @@
+
+  h3{
+    color: #555;
+  }
+  
+  #presentation{
+    width: 480px;
+    height: 120px;
+    padding: 20px;
+    margin: auto;
+    background: #FFF;
+    margin-top: 10px;
+    box-shadow: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(0,0,0,0.23); 
+    transition: all 0.3s; 
+    border-radius: 3px;
+  }
+  
+  #presentation:hover{
+    box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22);
+    transition: all 0.3s;
+    transform: translateZ(10px);
+  }
+  
+  #floating-button{
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    /* background: #db4437; */
+    position: fixed;
+    bottom: 60px;
+    right: 0;
+    cursor: pointer;
+    box-shadow: 0px 2px 5px #666;
+  }
+  
+  #container-floating{
+    z-index: 50;
+    position: fixed;
+    width: 70px;
+    height: 70px;
+    bottom: 60px;
+    right: 0;
+    
+  }
+  
+  #container-floating:hover{
+    height: 400px;
+    width: 90px;
+    padding: 30px;
+  }
+  
+  #container-floating:hover .plus{
+    animation: plus-in 0.15s linear;
+    animation-fill-mode: forwards;
+  }
+  
+  .edit{
+    z-index:1;
+    position: absolute;
+    top: 0;
+    display: block;
+    bottom: 0;
+    left: 0;
+    display: block;
+    right: 0;
+    padding: 0;
+    opacity: 0;
+    margin: auto;
+    line-height: 65px;
+    transform: rotateZ(-70deg);
+    transition: all 0.3s;
+    animation: edit-out 0.3s;
+  }
+  
+  #container-floating:hover .edit{
+    animation: edit-in 0.2s;
+     animation-delay: 0.1s;
+    animation-fill-mode: forwards;
+  }
+  
+  @keyframes edit-in{
+      from {opacity: 0; transform: rotateZ(-70deg);}
+      to {opacity: 1; transform: rotateZ(0deg);}
+  }
+  
+  @keyframes edit-out{
+      from {opacity: 1; transform: rotateZ(0deg);}
+      to {opacity: 0; transform: rotateZ(-70deg);}
+  }
+  
+  @keyframes plus-in{
+      from {opacity: 1; transform: rotateZ(0deg);}
+      to {opacity: 0; transform: rotateZ(180deg);}
+  }
+  
+  @keyframes plus-out{
+      from {opacity: 0; transform: rotateZ(180deg);}
+      to {opacity: 1; transform: rotateZ(0deg);}
+  }
+  
+  .nds{
+    right: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    position: fixed;
+    margin-left: 10px;
+    z-index: 300;
+    transform:  scale(0);
+    cursor: pointer;
+  }
+  /* .svg-icon-yt {
+    width: 42px;
+    height: 42px;
+  }
+  
+  .svg-icon-yt path,
+  .svg-icon-yt polygon,
+  .svg-icon-yt rect {
+    fill: red;
+  }
+  
+  .svg-icon-yt circle {
+    stroke: red;
+    stroke-width: 1;
+  } */
+  /* .svg-icon-mail {
+    width: 38px;
+    height: 38px;
+  }
+  
+  .svg-icon-mail path,
+  .svg-icon-mail polygon,
+  .svg-icon-mail rect {
+    fill: darkturquoise;
+  }
+  
+  .svg-icon-mail circle {
+    stroke: darkturquoise;
+    stroke-width: 1;
+  } */
+  /* .svg-icon {
+    width: 42px;
+    height: 33px;
+  }
+  
+  .svg-icon path,
+  .svg-icon polygon,
+  .svg-icon rect {
+    fill: seashell;
+  }
+  
+  .svg-icon circle {
+    stroke: seashell;
+    stroke-width: 1; */
+  /* } */
+  .nd1{
+    background: white; 
+    right: 0;
+    bottom: 110px;
+    animation-delay: 0.2s;
+      animation: bounce-out-nds 0.3s linear;
+    animation-fill-mode:  forwards;
+  }
+  
+  .nd3{
+    background: lightslategrey;
+    right: 0;
+    bottom: 170px;
+    animation-delay: 0.15s;
+      animation: bounce-out-nds 0.15s linear;
+    animation-fill-mode:  forwards;
+  }
+  
+  .nd4{
+    background: darkgrey;
+    right: 0;
+    bottom: 230px;
+    animation-delay: 0.1s;
+      animation: bounce-out-nds 0.1s linear;
+    animation-fill-mode:  forwards;
+  }
+  .nd5{
+     /* background: red;  */
+     fill: rgb(97, 195, 240);
+    right: 0;
+    bottom: 290px;
+    width:42px;
+    height:42px;
+    color :#fff;
+    animation-delay: 0.1s;
+      animation: bounce-out-nds 0.1s linear;
+    animation-fill-mode:  forwards;
+  }
+  /* .btn-whatsapp {
+    display:block;
+    width:70px;
+    height:70px;
+    color :#fff;
+    position: fixed;
+    right:20px;
+    bottom:20px;
+    border-radius:50%;
+    line-height:80px;
+    text-align:center;
+    
+} */
+  @keyframes bounce-nds{
+      from {opacity: 0;}
+      to {opacity: 1; transform: scale(1);}
+  }
+  
+  @keyframes bounce-out-nds{
+      from {opacity: 1; transform: scale(1);}
+      to {opacity: 0; transform: scale(0);}
+  }
+  
+  #container-floating:hover .nds{
+    
+    animation: bounce-nds 0.1s linear;
+    animation-fill-mode:  forwards;
+  }
+  
+  #container-floating:hover .nd3{
+    animation-delay: 0.08s;
+  }
+  #container-floating:hover .nd4{
+    animation-delay: 0.15s;
+  }
+  #container-floating:hover .nd5{
+    animation-delay: 0.2s;
+  }
+  
+  .letter{
+    color: white;
+    position: absolute;
+    left: 0;
+    right: 0;
+    margin: 0;
+    top: 0;
+    bottom: 0;
+    text-align: center;
+    line-height: 40px;
+  }
+  
+  .reminder{
+    position: absolute;
+    left: 0;
+    right: 0;
+    margin: auto;
+    top: 0;
+    bottom: 0;
+    line-height: 40px;
+  }
+  
+  .profile{
+    border-radius: 50%;
+    width: 40px;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    margin: auto;
+    right: 0;
+  }
